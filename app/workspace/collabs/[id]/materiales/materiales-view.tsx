@@ -6,10 +6,10 @@ import { toast } from "sonner"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { DownloadIcon, EllipsisIcon, ExternalLinkIcon, FileArchiveIcon, FileIcon, FileTextIcon, FileVideoIcon, FolderOpenIcon, ImageIcon, LinkIcon, PlusIcon, Trash2Icon, UploadIcon, type LucideIcon } from "lucide-react"
+import { CopyIcon, DownloadIcon, EllipsisIcon, ExternalLinkIcon, FileArchiveIcon, FileIcon, FileTextIcon, FileVideoIcon, FolderOpenIcon, ImageIcon, LinkIcon, MailQuestionIcon, PlusIcon, SendIcon, Trash2Icon, type LucideIcon } from "lucide-react"
 import { cn } from "cn"
 import { fmt } from "@/lib/format"
-import { TIPOS_MATERIAL, type Collab, type Material, type TipoMaterial } from "@/lib/influencer/modelo"
+import { TIPOS_MATERIAL, type Material, type TipoMaterial } from "@/lib/influencer/modelo"
 import { idNuevo } from "@/lib/influencer/tareas"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -20,6 +20,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { EmptyState } from "@/components/app/states"
 import { ConfirmDialog } from "@/components/app/confirm-dialog"
 import { Block, BlockHeader } from "@/components/influencer/block"
+import { ZonaSubida } from "@/components/influencer/zona-subida"
+import { useOrigen } from "@/components/influencer/navegador"
+import { useCollab } from "../collab-provider"
+import { PedirFormularioDialog } from "../pedir-formulario-dialog"
 
 const iconos: Record<TipoMaterial, LucideIcon> = { imagen: ImageIcon, video: FileVideoIcon, pdf: FileTextIcon, documento: FileIcon, enlace: LinkIcon, zip: FileArchiveIcon }
 
@@ -36,21 +40,27 @@ function tipoDeArchivo(archivo: File): TipoMaterial {
   return "documento"
 }
 
-/** Los materiales de la collab: lo que manda la marca (brief, logos, producto, claims) y lo suyo (contrato, referencias). */
-export function MaterialesView({ hoy, collab, materiales: iniciales }: { hoy: string; collab: Collab; materiales: Material[] }) {
-  const [materiales, setMateriales] = React.useState(iniciales)
+/**
+ * Los materiales de la collab: lo que manda la marca (brief, logos, producto, claims) y lo suyo
+ * (contrato, referencias). Se le pueden pedir a la marca con un enlace solo para subirlos.
+ */
+export function MaterialesView() {
+  const { collab, hoy, materiales: [materiales, setMateriales], formularios: [formularios] } = useCollab()
+  const origenUrl = useOrigen()
+  const [pedir, setPedir] = React.useState(false)
+  const pedidos = formularios.filter((f) => f.alcance === "materiales" && !f.respondidoEl)
   const [origen, setOrigen] = React.useState<Origen>("todos")
   const [enlaceAbierto, setEnlaceAbierto] = React.useState(false)
   const [borrando, setBorrando] = React.useState<Material | null>(null)
-  const archivoInput = React.useRef<HTMLInputElement>(null)
   const { register, handleSubmit, reset, formState } = useForm<ValoresEnlace>({ resolver: zodResolver(esquemaEnlace), defaultValues: { nombre: "", url: "" } })
   const { errors } = formState
 
   const visibles = materiales.filter((m) => origen === "todos" || m.origen === origen)
 
-  const subir = (archivos: FileList | null) => {
-    if (!archivos?.length) return
-    const nuevos = Array.from(archivos).map<Material>((a) => ({ id: idNuevo("m"), collabId: collab.id, nombre: a.name, tipo: tipoDeArchivo(a), origen: "mia", tamano: a.size, url: "#", subidoEl: hoy }))
+  const subir = (archivos: File[]) => {
+    if (!archivos.length) return
+    // Solo en este repo: el archivo se queda en el navegador; en el portal sube a R2.
+    const nuevos = archivos.map<Material>((a) => ({ id: idNuevo("m"), collabId: collab.id, nombre: a.name, tipo: tipoDeArchivo(a), origen: "mia", tamano: a.size, url: URL.createObjectURL(a), previewUrl: a.type.startsWith("image/") ? URL.createObjectURL(a) : undefined, subidoEl: hoy }))
     setMateriales((ms) => [...nuevos, ...ms])
     toast.success(nuevos.length === 1 ? "Archivo subido" : `${nuevos.length} archivos subidos`)
   }
@@ -70,19 +80,37 @@ export function MaterialesView({ hoy, collab, materiales: iniciales }: { hoy: st
 
   return (
     <>
+      {pedidos.map((f) => (
+        <div key={f.id} className="flex flex-wrap items-center gap-2 rounded-xl bg-info-soft px-4 py-2.5 text-sm text-info">
+          <MailQuestionIcon className="size-4 flex-none" />
+          <span className="min-w-0 flex-1">
+            Materiales pedidos a {f.para.nombre} el {fmt.date(f.creadoEl)}: lo que suba aparece aquí, marcado como «Marca».
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-info hover:text-info"
+            onClick={async () => {
+              await navigator.clipboard.writeText(`${origenUrl}/formulario/${f.token}`)
+              toast.success("Enlace copiado")
+            }}
+          >
+            <CopyIcon /> Copiar enlace
+          </Button>
+        </div>
+      ))}
       <Block>
         <BlockHeader
           title="Materiales"
           count={materiales.length}
           action={
             <>
+              <Button variant="outline" size="sm" onClick={() => setPedir(true)}>
+                <SendIcon /> Pedir a la marca
+              </Button>
               <Button variant="outline" size="sm" onClick={() => setEnlaceAbierto(true)}>
                 <LinkIcon /> Añadir enlace
               </Button>
-              <Button size="sm" onClick={() => archivoInput.current?.click()}>
-                <UploadIcon /> Subir archivo
-              </Button>
-              <input ref={archivoInput} type="file" multiple className="hidden" aria-label="Subir archivos" onChange={(e) => subir(e.target.files)} />
             </>
           }
         >
@@ -95,8 +123,9 @@ export function MaterialesView({ hoy, collab, materiales: iniciales }: { hoy: st
           </Tabs>
         </BlockHeader>
 
+        <ZonaSubida onArchivos={subir} compacta titulo="Arrastra aquí archivos o elígelos" ayuda="Logos, fotos del producto, la guía de claims o el contrato firmado" className="mb-4" />
         {visibles.length === 0 ? (
-          <EmptyState icon={FolderOpenIcon} title="Sin materiales" description="Sube lo que te mande la marca (brief, logos, fotos del producto, guía de claims) y lo tuyo (el contrato firmado). Puedes arrastrar varios archivos." action={<Button size="sm" variant="outline" onClick={() => archivoInput.current?.click()}><PlusIcon /> Subir archivo</Button>} />
+          <EmptyState icon={FolderOpenIcon} title="Sin materiales" description="Sube lo que te mande la marca y lo tuyo, o pídeselos con un enlace para que los suba ella." action={<Button size="sm" variant="outline" onClick={() => setPedir(true)}><PlusIcon /> Pedir a la marca</Button>} />
         ) : (
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {visibles.map((m) => {
@@ -174,6 +203,7 @@ export function MaterialesView({ hoy, collab, materiales: iniciales }: { hoy: st
         </DialogContent>
       </Dialog>
 
+      <PedirFormularioDialog open={pedir} onOpenChange={setPedir} alcance="materiales" />
       <ConfirmDialog
         open={borrando !== null}
         onOpenChange={(o) => !o && setBorrando(null)}

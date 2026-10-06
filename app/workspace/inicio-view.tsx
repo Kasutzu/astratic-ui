@@ -122,7 +122,7 @@ export function InicioView({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem onSelect={() => router.push("/workspace/propuestas?nueva=1")}>Propuesta</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => router.push("/workspace/crm?nueva=1")}>Propuesta</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => router.push("/workspace/collabs?nueva=1")}>Collab</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setNuevaTarea(true)}>Tarea</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setEditandoEnlaces(true)}>Enlace</DropdownMenuItem>
@@ -136,7 +136,7 @@ export function InicioView({
             <StatTile icon={WalletIcon} label="Pendiente de cobro" value={fmt.eur(cifras.pendienteDeCobro)} tint="peach" href="/workspace/cobros" />
             <StatTile icon={BanknoteIcon} label="Cobrado este año" value={fmt.eur(cifras.cobradoEsteAno)} tint="mint" href="/workspace/cobros" />
             <StatTile icon={SparklesIcon} label="Collabs en curso" value={cifras.collabsEnCurso} tint="rose" href="/workspace/collabs" />
-            <StatTile icon={KanbanSquareIcon} label="Propuestas abiertas" value={cifras.propuestasAbiertas} tint="sky" href="/workspace/propuestas" />
+            <StatTile icon={KanbanSquareIcon} label="Propuestas abiertas" value={cifras.propuestasAbiertas} tint="sky" href="/workspace/crm" />
           </StatRow>
 
           <Block>
@@ -235,7 +235,7 @@ export function InicioView({
               description={destacado.descripcion}
               action={
                 <Button size="sm" variant="secondary" className="w-fit" asChild>
-                  <Link href={destacado.href ?? "/workspace/propuestas"}>Ver la propuesta</Link>
+                  <Link href={destacado.href ?? "/workspace/crm"}>Ver la propuesta</Link>
                 </Button>
               }
             />

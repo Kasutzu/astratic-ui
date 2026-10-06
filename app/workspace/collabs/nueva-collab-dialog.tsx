@@ -1,58 +1,77 @@
 "use client"
 
 import * as React from "react"
-import { Controller, useForm } from "react-hook-form"
+import { Controller, useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { FORMATOS, LISTA_FORMATOS, TIPOS_COLLAB, type Collab, type Marca, type Pieza, type TipoCollab } from "@/lib/influencer/modelo"
+import { FilePenLineIcon, SendIcon } from "lucide-react"
+import { TIPOS_COLLAB, type Collab, type Contacto, type FormularioMarca, type Marca, type TipoCollab } from "@/lib/influencer/modelo"
+import { PIEZA_VACIA, caducidad, esquemaPiezaPedida, piezaNueva, tokenNuevo } from "@/lib/influencer/formularios"
 import { idNuevo } from "@/lib/influencer/tareas"
 import { importeNeto } from "@/lib/influencer/presupuesto"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Field, FieldError, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { PiezasEditor } from "@/components/influencer/piezas-editor"
 
-const cantidad = z.number({ error: "Escribe un número" }).int().min(0).max(20)
+const OTRA = "otra"
 
 const esquema = z
   .object({
+    modo: z.enum(["yo", "marca"]),
     marcaId: z.string().min(1, "Elige la marca"),
     campana: z.string().trim().min(1, "Ponle nombre a la campaña").max(80),
     tipo: z.enum(["directa", "red", "regalo", "ugc"]),
     importe: z.number({ error: "Escribe el importe" }).min(0),
     desde: z.string().min(1, "Falta la fecha"),
     hasta: z.string().min(1, "Falta la fecha"),
-    cantidades: z.object({ reel: cantidad, story: cantidad, post: cantidad, tiktok: cantidad, youtube: cantidad, ugc: cantidad }),
+    piezas: z.array(esquemaPiezaPedida),
+    contactoId: z.string(),
+    para: z.object({ nombre: z.string().trim(), email: z.string().trim() }),
+    alcance: z.enum(["brief", "materiales"]),
+    mensaje: z.string().max(600),
   })
   .refine((v) => v.hasta >= v.desde, { message: "Tiene que ser después del inicio", path: ["hasta"] })
-  .refine((v) => Object.values(v.cantidades).some((n) => n > 0), { message: "Indica al menos una pieza", path: ["cantidades"] })
+  .refine((v) => v.modo === "marca" || v.piezas.length > 0, { message: "Añade al menos una pieza", path: ["piezas"] })
+  .refine((v) => v.modo === "yo" || v.para.nombre.length > 0, { message: "¿A quién se lo mandas?", path: ["para", "nombre"] })
+  .refine((v) => v.modo === "yo" || z.string().email().safeParse(v.para.email).success, { message: "Revisa el email", path: ["para", "email"] })
 
 type Valores = z.infer<typeof esquema>
 
-/** Alta de una collab a mano (las que vienen de una propuesta ganada se crean solas): lo justo para empezar el brief. */
-export function NuevaCollabDialog({ open, onOpenChange, marcas, hoy, onCreate }: { open: boolean; onOpenChange: (open: boolean) => void; marcas: Marca[]; hoy: string; onCreate: (collab: Collab) => void }) {
-  const { register, handleSubmit, control, reset, formState } = useForm<Valores>({
-    resolver: zodResolver(esquema),
-    defaultValues: { marcaId: "", campana: "", tipo: "directa", importe: 0, desde: "", hasta: "", cantidades: { reel: 1, story: 0, post: 0, tiktok: 0, youtube: 0, ugc: 0 } },
-  })
-  const { errors } = formState
+const mensajePorDefecto = (nombre: string) => `Hola${nombre ? ` ${nombre.split(" ")[0]}` : ""}: aquí puedes contarme la campaña y las piezas que necesitáis, y subir los materiales. Así lo tengo todo en un sitio.`
 
-  React.useEffect(() => {
-    if (open) reset()
-  }, [open, reset])
+export type CollabCreada = { collab: Collab; formulario?: FormularioMarca }
+
+/**
+ * Alta de una collab que no viene de una propuesta (un regalo, un trato cerrado por WhatsApp). O la
+ * rellena ella con sus piezas, o le manda a la marca un formulario por enlace para que cuente la
+ * campaña, las piezas y los materiales: la collab queda «esperando el brief».
+ */
+export function NuevaCollabDialog({ open, onOpenChange, marcas, contactos, hoy, onCreate }: { open: boolean; onOpenChange: (open: boolean) => void; marcas: Marca[]; contactos: Contacto[]; hoy: string; onCreate: (creada: CollabCreada) => void }) {
+  const vacio: Valores = { modo: "yo", marcaId: "", campana: "", tipo: "directa", importe: 0, desde: "", hasta: "", piezas: [{ ...PIEZA_VACIA }], contactoId: OTRA, para: { nombre: "", email: "" }, alcance: "brief", mensaje: mensajePorDefecto("") }
+  const { register, handleSubmit, control, reset, setValue, getValues, formState } = useForm<Valores>({ resolver: zodResolver(esquema), defaultValues: vacio })
+  const { errors } = formState
+  const [modo, marcaId, desde, hasta] = useWatch({ control, name: ["modo", "marcaId", "desde", "hasta"] })
+  const deLaMarca = contactos.filter((c) => c.marcaId === marcaId)
+
+  const elegirContacto = (id: string) => {
+    const c = deLaMarca.find((x) => x.id === id)
+    setValue("contactoId", id)
+    setValue("para", { nombre: c?.nombre ?? "", email: c?.email ?? "" })
+    if (getValues("mensaje") === mensajePorDefecto("") || deLaMarca.some((x) => getValues("mensaje") === mensajePorDefecto(x.nombre))) setValue("mensaje", mensajePorDefecto(c?.nombre ?? ""))
+  }
 
   const crear = (v: Valores) => {
     const marca = marcas.find((m) => m.id === v.marcaId)
     if (!marca) return
     const id = idNuevo("c")
-    const piezas: Pieza[] = LISTA_FORMATOS.filter((f) => v.cantidades[f] > 0).flatMap((f): Pieza[] => {
-      const n = v.cantidades[f]
-      // Las stories van en una sola pieza (se graban y aprueban juntas); el resto, una pieza por unidad.
-      if (f === "story") return [{ id: idNuevo("pz"), collabId: id, formato: f, unidades: n, titulo: `${n} ${n === 1 ? "story" : "stories"}`, publicacion: v.hasta, estado: "borrador", guion: [], video: [], rondaActual: 1 }]
-      return Array.from({ length: n }, (_, i) => ({ id: idNuevo("pz"), collabId: id, formato: f, unidades: 1, titulo: n === 1 ? FORMATOS[f].label : `${FORMATOS[f].label} ${i + 1}`, publicacion: v.hasta, estado: "borrador", guion: [], video: [], rondaActual: 1 }))
-    })
-    onCreate({
+    const principal = deLaMarca.find((c) => c.principal) ?? deLaMarca[0]
+    const collab: Collab = {
       id,
       marcaId: marca.id,
       campana: v.campana,
@@ -63,30 +82,63 @@ export function NuevaCollabDialog({ open, onOpenChange, marcas, hoy, onCreate }:
       tint: marca.tint,
       desde: v.desde,
       hasta: v.hasta,
-      brief: { objetivo: "", mensajesClave: [], menciones: [], hashtags: [], rondasIncluidas: 2, claimsPermitidos: [], claimsProhibidos: [], hacer: [], evitar: [], contacto: { nombre: marca.contactos[0]?.nombre ?? "", email: marca.contactos[0]?.email ?? "" }, condicionesPago: "" },
-      piezas,
+      brief: { texto: "", menciones: [], hashtags: [], rondasIncluidas: 2, contacto: { nombre: v.modo === "marca" ? v.para.nombre : (principal?.nombre ?? ""), email: v.modo === "marca" ? v.para.email : (principal?.email ?? "") }, condicionesPago: "30 días tras publicar" },
+      piezas: v.modo === "yo" ? v.piezas.map((p) => piezaNueva({ collabId: id, tipo: p.tipo, titulo: p.titulo, publicacion: p.publicacion || v.hasta, red: p.red, indicaciones: p.indicaciones })) : [],
       cobro: { estado: "por-facturar" },
+      plazos: [{ id: idNuevo("pl"), concepto: "A 30 días tras publicar", porcentaje: 100 }],
       creadaEl: hoy,
-    })
+    }
+    const formulario: FormularioMarca | undefined =
+      v.modo === "marca" ? { id: idNuevo("fm"), token: tokenNuevo("fm"), collabId: id, alcance: v.alcance, para: v.para, mensaje: v.mensaje.trim() || undefined, creadoEl: hoy, caduca: caducidad(hoy) } : undefined
+    onCreate({ collab, formulario })
     onOpenChange(false)
+    reset(vacio)
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[520px]">
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) reset(vacio)
+        onOpenChange(o)
+      }}
+    >
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-[760px]">
         <DialogHeader>
           <DialogTitle>Nueva collab</DialogTitle>
-          <DialogDescription>Las piezas se crean con la fecha final; después se ajusta cada una en Contenidos y el brief se rellena en su pestaña.</DialogDescription>
+          <DialogDescription>{modo === "yo" ? "Lo justo para empezar: las piezas se ajustan después en Contenidos y el brief, arriba en la collab." : "La marca recibe un enlace sin cuenta para contar la campaña, añadir las piezas y subir los materiales. Te llega todo a esta collab."}</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit(crear)} noValidate className="grid gap-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <Controller
+            control={control}
+            name="modo"
+            render={({ field }) => (
+              <Tabs value={field.value} onValueChange={(v) => field.onChange(v === "marca" ? "marca" : "yo")}>
+                <TabsList className="w-full sm:w-fit">
+                  <TabsTrigger value="yo"><FilePenLineIcon /> La relleno yo</TabsTrigger>
+                  <TabsTrigger value="marca"><SendIcon /> Pedir el brief a la marca</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            )}
+          />
+
+          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_160px]">
             <Field data-invalid={!!errors.marcaId || undefined}>
               <FieldLabel htmlFor="nc-marca">Marca</FieldLabel>
               <Controller
                 control={control}
                 name="marcaId"
                 render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
+                  <Select
+                    value={field.value}
+                    onValueChange={(v) => {
+                      field.onChange(v)
+                      const principal = contactos.filter((c) => c.marcaId === v).find((c) => c.principal) ?? contactos.find((c) => c.marcaId === v)
+                      setValue("contactoId", principal?.id ?? OTRA)
+                      setValue("para", { nombre: principal?.nombre ?? "", email: principal?.email ?? "" })
+                      setValue("mensaje", mensajePorDefecto(principal?.nombre ?? ""))
+                    }}
+                  >
                     <SelectTrigger id="nc-marca" className="w-full" aria-invalid={!!errors.marcaId}>
                       <SelectValue placeholder="Elige la marca" />
                     </SelectTrigger>
@@ -101,6 +153,11 @@ export function NuevaCollabDialog({ open, onOpenChange, marcas, hoy, onCreate }:
                 )}
               />
               <FieldError errors={[errors.marcaId]} />
+            </Field>
+            <Field data-invalid={!!errors.campana || undefined}>
+              <FieldLabel htmlFor="nc-campana">Campaña</FieldLabel>
+              <Input id="nc-campana" placeholder="Lanzamiento de otoño" aria-invalid={!!errors.campana} {...register("campana")} />
+              <FieldError errors={[errors.campana]} />
             </Field>
             <Field>
               <FieldLabel htmlFor="nc-tipo">Tipo</FieldLabel>
@@ -124,11 +181,7 @@ export function NuevaCollabDialog({ open, onOpenChange, marcas, hoy, onCreate }:
               />
             </Field>
           </div>
-          <Field data-invalid={!!errors.campana || undefined}>
-            <FieldLabel htmlFor="nc-campana">Campaña</FieldLabel>
-            <Input id="nc-campana" placeholder="Lanzamiento de otoño" aria-invalid={!!errors.campana} {...register("campana")} />
-            <FieldError errors={[errors.campana]} />
-          </Field>
+
           <div className="grid gap-4 sm:grid-cols-3">
             <Field data-invalid={!!errors.importe || undefined}>
               <FieldLabel htmlFor="nc-importe">Importe (€)</FieldLabel>
@@ -146,23 +199,87 @@ export function NuevaCollabDialog({ open, onOpenChange, marcas, hoy, onCreate }:
               <FieldError errors={[errors.hasta]} />
             </Field>
           </div>
-          <Field data-invalid={!!errors.cantidades || undefined}>
-            <FieldLabel>Piezas</FieldLabel>
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-              {LISTA_FORMATOS.map((f) => (
-                <label key={f} className="flex flex-col gap-1 text-xs text-muted-foreground">
-                  {FORMATOS[f].label}
-                  <Input type="number" min={0} max={20} inputMode="numeric" className="h-8 px-2 tabular-nums" {...register(`cantidades.${f}`, { valueAsNumber: true })} />
-                </label>
-              ))}
-            </div>
-            <FieldError errors={[errors.cantidades?.root ?? errors.cantidades]} />
-          </Field>
+
+          {modo === "yo" ? (
+            <Field data-invalid={!!errors.piezas || undefined}>
+              <FieldLabel>Piezas</FieldLabel>
+              <Controller control={control} name="piezas" render={({ field }) => <PiezasEditor value={field.value} onChange={field.onChange} errores={errors.piezas?.map?.((e) => e?.titulo?.message)} ventana={{ desde, hasta }} />} />
+              <FieldError errors={[errors.piezas?.root ?? (errors.piezas?.message ? errors.piezas : undefined)]} />
+            </Field>
+          ) : (
+            <>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Field>
+                  <FieldLabel htmlFor="nc-contacto">Para</FieldLabel>
+                  <Controller
+                    control={control}
+                    name="contactoId"
+                    render={({ field }) => (
+                      <Select value={field.value} onValueChange={elegirContacto} disabled={!marcaId}>
+                        <SelectTrigger id="nc-contacto" className="w-full">
+                          <SelectValue placeholder="Elige la persona" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {deLaMarca.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.nombre}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value={OTRA}>Otra persona</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                </Field>
+                <Field data-invalid={!!errors.para?.nombre || undefined}>
+                  <FieldLabel htmlFor="nc-para-nombre">Nombre</FieldLabel>
+                  <Input id="nc-para-nombre" placeholder="Clara Benet" aria-invalid={!!errors.para?.nombre} {...register("para.nombre")} />
+                  <FieldError errors={[errors.para?.nombre]} />
+                </Field>
+                <Field data-invalid={!!errors.para?.email || undefined}>
+                  <FieldLabel htmlFor="nc-para-email">Email</FieldLabel>
+                  <Input id="nc-para-email" type="email" placeholder="nombre@marca.com" aria-invalid={!!errors.para?.email} {...register("para.email")} />
+                  <FieldError errors={[errors.para?.email]} />
+                </Field>
+              </div>
+              <Field>
+                <FieldLabel>Qué le pides</FieldLabel>
+                <Controller
+                  control={control}
+                  name="alcance"
+                  render={({ field }) => (
+                    <RadioGroup value={field.value} onValueChange={(v) => field.onChange(v === "materiales" ? "materiales" : "brief")} className="grid gap-2 sm:grid-cols-2">
+                      <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 has-[[data-state=checked]]:border-brand has-[[data-state=checked]]:bg-brand-soft">
+                        <RadioGroupItem value="brief" className="mt-0.5" />
+                        <span className="text-sm">
+                          <span className="font-medium">El brief completo</span>
+                          <span className="block text-xs text-muted-foreground">La campaña, las piezas, los materiales y sus datos de facturación.</span>
+                        </span>
+                      </label>
+                      <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 has-[[data-state=checked]]:border-brand has-[[data-state=checked]]:bg-brand-soft">
+                        <RadioGroupItem value="materiales" className="mt-0.5" />
+                        <span className="text-sm">
+                          <span className="font-medium">Solo los materiales</span>
+                          <span className="block text-xs text-muted-foreground">Logos, fotos del producto, guía de claims.</span>
+                        </span>
+                      </label>
+                    </RadioGroup>
+                  )}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="nc-mensaje">Mensaje</FieldLabel>
+                <Textarea id="nc-mensaje" rows={3} {...register("mensaje")} />
+                <FieldDescription>Sale arriba del formulario y en el WhatsApp o el email con el enlace.</FieldDescription>
+              </Field>
+            </>
+          )}
+
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
-            <Button type="submit">Crear collab</Button>
+            <Button type="submit">{modo === "yo" ? "Crear collab" : <><SendIcon /> Crear y preparar el enlace</>}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
