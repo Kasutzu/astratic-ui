@@ -8,17 +8,34 @@ import { Block } from "@/components/influencer/block"
 
 export const metadata: Metadata = { title: "En construcción" }
 
-/** Las demás páginas del workspace llegan una a una, después de validar el Inicio. Hasta entonces, esta pantalla. */
+const NOMBRES: Record<string, string> = {
+  tareas: "Tareas",
+  contenidos: "Contenidos",
+  cobros: "Cobros",
+  perfil: "Perfil y tarifas",
+  biblia: "Biblia",
+  ajustes: "Ajustes",
+  avisos: "Avisos",
+}
+
+const DESCRIPCIONES: Record<string, string> = {
+  tareas: "La página general de tareas, al estilo de Notion: todas las de todas las collabs y propuestas, más las tuyas, con calendario. Hasta que llegue, cada collab y cada propuesta tienen las suyas en su ficha.",
+  contenidos: "La biblioteca con todas las piezas de todas las collabs por estado. Hasta que llegue, cada collab tiene su pestaña de Contenidos.",
+  cobros: "Pendiente, vencido y cobrado, con los datos listos para facturar. Hasta que llegue, el cobro de cada collab está en su resumen.",
+}
+
+/** Las páginas que aún no están construidas llegan una a una; hasta entonces, esta pantalla dice qué serán. */
 export default async function SeccionPage({ params }: { params: Promise<{ seccion: string[] }> }) {
   const { seccion } = await params
-  const nombre = seccion[0] ?? ""
+  const clave = seccion[0] ?? ""
+  const nombre = NOMBRES[clave] ?? `${clave.charAt(0).toUpperCase()}${clave.slice(1)}`
   return (
     <PageBody className="px-4 pb-28 md:px-[34px] md:pb-10">
       <Block className="min-h-[60vh] justify-center">
         <EmptyState
           icon={ConstructionIcon}
-          title={`«${nombre.charAt(0).toUpperCase()}${nombre.slice(1)}» llega después del Inicio`}
-          description="En la demo del design system solo está construida la página de Inicio. Las demás se diseñan con él una vez validado."
+          title={`«${nombre}» está por construir`}
+          description={DESCRIPCIONES[clave] ?? "Construidas hasta ahora: Inicio, Propuestas y Collabs con su ficha completa. Esta llega después."}
           action={
             <Button variant="outline" size="sm" asChild>
               <Link href="/workspace">Volver al Inicio</Link>

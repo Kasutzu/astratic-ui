@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import {
   BanknoteIcon,
   BellRingIcon,
@@ -17,7 +18,10 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { fmt } from "@/lib/format"
-import type { Collab, InfluencerProfile, Notice, NoticeKind, QuickLink, Task, TaskBucket } from "@/lib/influencer/demo-data"
+import type { Aviso, Collab, Enlace, Marca, Perfil, Propuesta, Tarea, TipoAviso } from "@/lib/influencer/modelo"
+import { describirEntregables, marcaDe, siguienteHito, unidadesHechas, unidadesTotales } from "@/lib/influencer/collabs"
+import { contextoDeTarea, grupoDeTarea, type GrupoTarea } from "@/lib/influencer/tareas"
+import { soloFecha } from "@/lib/influencer/fechas"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -30,8 +34,9 @@ import { TaskCard } from "@/components/influencer/task-card"
 import { ProfilePanel } from "@/components/influencer/profile-panel"
 import { NoticeHighlight, NoticeItem } from "@/components/influencer/notice-card"
 import { LinkGrid } from "@/components/influencer/link-grid"
+import { TaskDialog } from "@/components/influencer/task-dialog"
 
-const noticeIcon: Record<NoticeKind, LucideIcon> = {
+const iconoAviso: Record<TipoAviso, LucideIcon> = {
   oportunidad: SparklesIcon,
   cambios: MessageSquareWarningIcon,
   aprobado: CircleCheckIcon,
@@ -39,7 +44,9 @@ const noticeIcon: Record<NoticeKind, LucideIcon> = {
   astratic: BellRingIcon,
 }
 
-const buckets: { id: TaskBucket; label: string }[] = [
+type Pestana = Extract<GrupoTarea, "hoy" | "semana" | "vencidas">
+
+const pestanas: { id: Pestana; label: string }[] = [
   { id: "hoy", label: "Hoy" },
   { id: "semana", label: "Esta semana" },
   { id: "vencidas", label: "Vencidas" },
@@ -48,55 +55,64 @@ const buckets: { id: TaskBucket; label: string }[] = [
 export function InicioView({
   greeting,
   now,
-  profile,
-  stats,
+  perfil,
+  cifras,
   collabs,
-  tasks: initialTasks,
-  highlight,
-  notices,
-  links: initialLinks,
+  marcas,
+  propuestas,
+  tareas: tareasIniciales,
+  destacado,
+  avisos,
+  enlaces: enlacesIniciales,
 }: {
   greeting: string
   now: string
-  profile: InfluencerProfile
-  stats: { pendingAmount: number; collectedThisYear: number; activeCollabs: number; openProposals: number }
+  perfil: Perfil
+  cifras: { pendienteDeCobro: number; cobradoEsteAno: number; collabsEnCurso: number; propuestasAbiertas: number }
   collabs: Collab[]
-  tasks: Task[]
-  highlight: Notice
-  notices: Notice[]
-  links: QuickLink[]
+  marcas: Marca[]
+  propuestas: Propuesta[]
+  tareas: Tarea[]
+  destacado: Aviso
+  avisos: Aviso[]
+  enlaces: Enlace[]
 }) {
-  const [tasks, setTasks] = React.useState(initialTasks)
-  const [bucket, setBucket] = React.useState<TaskBucket>("hoy")
-  const [links, setLinks] = React.useState(initialLinks)
-  const [editingLinks, setEditingLinks] = React.useState(false)
-  const today = new Date(now)
+  const router = useRouter()
+  const [tareas, setTareas] = React.useState(tareasIniciales)
+  const [pestana, setPestana] = React.useState<Pestana>("hoy")
+  const [enlaces, setEnlaces] = React.useState(enlacesIniciales)
+  const [editandoEnlaces, setEditandoEnlaces] = React.useState(false)
+  const [nuevaTarea, setNuevaTarea] = React.useState(false)
+  const ahora = new Date(now)
+  const hoyFecha = soloFecha(now)
+  const contexto = { collabs, propuestas, marcas }
 
-  const pending = (b: TaskBucket) => tasks.filter((t) => t.bucket === b && !t.done).length
-  const visibleTasks = tasks.filter((t) => t.bucket === bucket)
-  const overdue = pending("vencidas")
-  const dueToday = pending("hoy")
+  const pendientes = (g: GrupoTarea) => tareas.filter((t) => grupoDeTarea(t, hoyFecha) === g).length
+  const visibles = tareas.filter((t) => grupoDeTarea(t, hoyFecha) === pestana || (t.hecha && t.fechaLimite === hoyFecha && pestana === "hoy"))
+  const vencidas = pendientes("vencidas")
+  const deHoy = pendientes("hoy")
 
-  const toggleTask = (id: string) =>
-    setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, done: !t.done } : t)))
+  const marcarTarea = (id: string) => setTareas((ts) => ts.map((t) => (t.id === id ? { ...t, hecha: !t.hecha } : t)))
 
   const urgente =
-    overdue > 0 || dueToday > 0
-      ? [overdue > 0 && `${overdue} ${overdue === 1 ? "tarea vencida" : "tareas vencidas"}`, dueToday > 0 && `${dueToday} para hoy`]
-          .filter(Boolean)
-          .join(" y ")
+    vencidas > 0 || deHoy > 0
+      ? [vencidas > 0 && `${vencidas} ${vencidas === 1 ? "tarea vencida" : "tareas vencidas"}`, deHoy > 0 && `${deHoy} para hoy`].filter(Boolean).join(" y ")
       : "nada urgente"
 
   return (
     <PageBody className="gap-6 px-4 pb-28 md:px-[34px] md:pb-10">
       <header className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-sm text-muted-foreground">{fmt.dateLong(today)}</p>
+          <p className="text-sm text-muted-foreground">{fmt.dateLong(ahora)}</p>
           <h1 className="mt-1 text-[27px] leading-tight font-semibold tracking-tight">
-            {greeting}, {profile.firstName}
+            {greeting}, {perfil.nombrePila}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Tienes <button type="button" onClick={() => setBucket(overdue > 0 ? "vencidas" : "hoy")} className="font-medium text-foreground underline-offset-2 hover:underline">{urgente}</button>.
+            Tienes{" "}
+            <button type="button" onClick={() => setPestana(vencidas > 0 ? "vencidas" : "hoy")} className="font-medium text-foreground underline-offset-2 hover:underline">
+              {urgente}
+            </button>
+            .
           </p>
         </div>
         <DropdownMenu>
@@ -106,10 +122,10 @@ export function InicioView({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem onSelect={() => toast("Las propuestas llegan con su página")}>Propuesta</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => toast("Las collabs llegan con su página")}>Collab</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => toast("Las tareas nuevas llegan con la página de Collabs")}>Tarea</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setEditingLinks(true)}>Enlace</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => router.push("/workspace/propuestas?nueva=1")}>Propuesta</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => router.push("/workspace/collabs?nueva=1")}>Collab</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setNuevaTarea(true)}>Tarea</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setEditandoEnlaces(true)}>Enlace</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </header>
@@ -117,10 +133,10 @@ export function InicioView({
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_372px]">
         <div className="flex min-w-0 flex-col gap-6">
           <StatRow>
-            <StatTile icon={WalletIcon} label="Pendiente de cobro" value={fmt.eur(stats.pendingAmount)} tint="peach" href="/workspace/cobros" />
-            <StatTile icon={BanknoteIcon} label="Cobrado este año" value={fmt.eur(stats.collectedThisYear)} tint="mint" href="/workspace/cobros" />
-            <StatTile icon={SparklesIcon} label="Collabs en curso" value={stats.activeCollabs} tint="rose" href="/workspace/collabs" />
-            <StatTile icon={KanbanSquareIcon} label="Propuestas abiertas" value={stats.openProposals} tint="sky" href="/workspace/propuestas" />
+            <StatTile icon={WalletIcon} label="Pendiente de cobro" value={fmt.eur(cifras.pendienteDeCobro)} tint="peach" href="/workspace/cobros" />
+            <StatTile icon={BanknoteIcon} label="Cobrado este año" value={fmt.eur(cifras.cobradoEsteAno)} tint="mint" href="/workspace/cobros" />
+            <StatTile icon={SparklesIcon} label="Collabs en curso" value={cifras.collabsEnCurso} tint="rose" href="/workspace/collabs" />
+            <StatTile icon={KanbanSquareIcon} label="Propuestas abiertas" value={cifras.propuestasAbiertas} tint="sky" href="/workspace/propuestas" />
           </StatRow>
 
           <Block>
@@ -129,56 +145,59 @@ export function InicioView({
               <EmptyState title="Sin collabs en curso" description="Cuando ganes una propuesta aparecerá aquí con sus piezas y fechas." />
             ) : (
               <CollabCardRow>
-                {collabs.map((c) => (
-                  <CollabCard
-                    key={c.id}
-                    brand={c.brand}
-                    campaign={c.campaign}
-                    deliverables={c.deliverables}
-                    done={c.done}
-                    total={c.total}
-                    nextLabel={c.nextLabel}
-                    nextDate={c.nextDate}
-                    tint={c.tint}
-                    coverUrl={c.coverUrl}
-                    href={`/workspace/collabs/${c.id}`}
-                  />
-                ))}
+                {collabs.map((c) => {
+                  const hito = siguienteHito(c)
+                  return (
+                    <CollabCard
+                      key={c.id}
+                      brand={marcaDe(c, marcas).nombre}
+                      campaign={c.campana}
+                      deliverables={describirEntregables(c)}
+                      done={unidadesHechas(c)}
+                      total={unidadesTotales(c)}
+                      nextLabel={hito?.label ?? "Todo entregado"}
+                      nextDate={hito?.fecha ?? c.hasta}
+                      tint={c.tint}
+                      coverUrl={c.coverUrl}
+                      href={`/workspace/collabs/${c.id}`}
+                    />
+                  )
+                })}
               </CollabCardRow>
             )}
           </Block>
 
           <Block>
-            <BlockHeader title="Tareas" count={pending("hoy") + pending("semana") + pending("vencidas")} href="/workspace/collabs/tareas">
-              <Tabs value={bucket} onValueChange={(v) => setBucket(v as TaskBucket)} className="sm:ml-2">
+            <BlockHeader title="Tareas" count={pendientes("hoy") + pendientes("semana") + pendientes("vencidas")} href="/workspace/tareas">
+              <Tabs value={pestana} onValueChange={(v) => setPestana(v as Pestana)} className="sm:ml-2">
                 <TabsList variant="line" className="flex-wrap">
-                  {buckets.map((b) => (
-                    <TabsTrigger key={b.id} value={b.id}>
-                      {b.label}
-                      {pending(b.id) > 0 && (
-                        <span className="ml-1 rounded-full bg-muted px-1.5 text-[11px] tabular-nums text-muted-foreground">{pending(b.id)}</span>
+                  {pestanas.map((p) => (
+                    <TabsTrigger key={p.id} value={p.id}>
+                      {p.label}
+                      {pendientes(p.id) > 0 && (
+                        <span className="ml-1 rounded-full bg-muted px-1.5 text-[11px] tabular-nums text-muted-foreground">{pendientes(p.id)}</span>
                       )}
                     </TabsTrigger>
                   ))}
                 </TabsList>
               </Tabs>
             </BlockHeader>
-            {visibleTasks.length === 0 ? (
+            {visibles.length === 0 ? (
               <EmptyState
-                title={bucket === "vencidas" ? "Nada vencido" : "Nada pendiente"}
-                description={bucket === "vencidas" ? "Vas al día." : "Las tareas salen solas de las fechas de cada collab."}
+                title={pestana === "vencidas" ? "Nada vencido" : "Nada pendiente"}
+                description={pestana === "vencidas" ? "Vas al día." : "Las tareas salen solas de las fechas de cada collab."}
               />
             ) : (
               <ul className="flex flex-col gap-2">
-                {visibleTasks.map((t) => (
+                {visibles.map((t) => (
                   <li key={t.id}>
                     <TaskCard
-                      title={t.title}
-                      context={t.context}
-                      dueAt={t.dueAt}
-                      tone={t.bucket === "vencidas" ? "vencida" : t.bucket === "hoy" ? "hoy" : "normal"}
-                      done={t.done}
-                      onToggle={() => toggleTask(t.id)}
+                      title={t.titulo}
+                      context={contextoDeTarea(t, contexto)}
+                      dueAt={t.fechaLimite ?? hoyFecha}
+                      tone={pestana === "vencidas" ? "vencida" : pestana === "hoy" ? "hoy" : "normal"}
+                      done={t.hecha}
+                      onToggle={() => marcarTarea(t.id)}
                     />
                   </li>
                 ))}
@@ -189,13 +208,13 @@ export function InicioView({
 
         <div className="flex min-w-0 flex-col gap-6">
           <ProfilePanel
-            name={profile.name}
-            handle={profile.handle}
-            photoUrl={profile.photoUrl}
-            niche={profile.niche}
-            tier={profile.tier}
-            city={profile.city}
-            accounts={profile.accounts}
+            name={perfil.nombre}
+            handle={perfil.handle}
+            photoUrl={perfil.fotoUrl}
+            niche={perfil.nicho}
+            tier={perfil.tramo}
+            city={perfil.ciudad}
+            accounts={perfil.cuentas.map((c) => ({ network: c.red, handle: c.handle, url: c.url, followers: c.seguidores, avgViews: c.visualizacionesMedias }))}
             actions={
               <>
                 <Button variant="outline" size="sm" onClick={() => toast("El media kit en PDF llega con Perfil y tarifas")}>
@@ -209,28 +228,21 @@ export function InicioView({
           />
 
           <Block>
-            <BlockHeader title="Avisos" count={notices.filter((n) => n.unread).length + (highlight.unread ? 1 : 0)} href="/workspace/avisos" hrefLabel="Ver todos" />
+            <BlockHeader title="Avisos" count={avisos.filter((n) => !n.leido).length + (destacado.leido ? 0 : 1)} href="/workspace/avisos" hrefLabel="Ver todos" />
             <NoticeHighlight
               eyebrow="Red Astratic"
-              title={highlight.title}
-              description={highlight.description}
+              title={destacado.titulo}
+              description={destacado.descripcion}
               action={
                 <Button size="sm" variant="secondary" className="w-fit" asChild>
-                  <Link href="/workspace/propuestas">Ver la propuesta</Link>
+                  <Link href={destacado.href ?? "/workspace/propuestas"}>Ver la propuesta</Link>
                 </Button>
               }
             />
             <ul className="mt-3 flex flex-col">
-              {notices.map((n) => (
+              {avisos.map((n) => (
                 <li key={n.id}>
-                  <NoticeItem
-                    icon={noticeIcon[n.kind]}
-                    title={n.title}
-                    description={n.description}
-                    meta={fmt.relative(n.at, today)}
-                    unread={n.unread}
-                    href="/workspace/avisos"
-                  />
+                  <NoticeItem icon={iconoAviso[n.tipo]} title={n.titulo} description={n.descripcion} meta={fmt.relative(n.el, ahora)} unread={!n.leido} href={n.href ?? "/workspace/avisos"} />
                 </li>
               ))}
             </ul>
@@ -240,8 +252,8 @@ export function InicioView({
             <BlockHeader
               title="Mis enlaces"
               action={
-                <Button variant={editingLinks ? "default" : "ghost"} size="sm" onClick={() => setEditingLinks((e) => !e)}>
-                  {editingLinks ? (
+                <Button variant={editandoEnlaces ? "default" : "ghost"} size="sm" onClick={() => setEditandoEnlaces((e) => !e)}>
+                  {editandoEnlaces ? (
                     "Listo"
                   ) : (
                     <>
@@ -251,22 +263,36 @@ export function InicioView({
                 </Button>
               }
             />
-            {links.length === 0 && !editingLinks ? (
+            {enlaces.length === 0 && !editandoEnlaces ? (
               <EmptyState
                 title="Sin enlaces"
                 description="Añade los que uses a diario: tu Drive, tus plantillas, tu gestoría…"
                 action={
-                  <Button size="sm" variant="outline" onClick={() => setEditingLinks(true)}>
+                  <Button size="sm" variant="outline" onClick={() => setEditandoEnlaces(true)}>
                     <PlusIcon /> Añadir enlace
                   </Button>
                 }
               />
             ) : (
-              <LinkGrid links={links} onChange={setLinks} editing={editingLinks} />
+              <LinkGrid links={enlaces.map((e) => ({ id: e.id, label: e.etiqueta, url: e.url }))} onChange={(ls) => setEnlaces(ls.map((l) => ({ id: l.id, etiqueta: l.label, url: l.url })))} editing={editandoEnlaces} />
             )}
           </Block>
         </div>
       </div>
+
+      <TaskDialog
+        open={nuevaTarea}
+        onOpenChange={setNuevaTarea}
+        hoy={hoyFecha}
+        relaciones={[
+          ...collabs.map((c) => ({ tipo: "collab" as const, id: c.id, label: `${marcaDe(c, marcas).nombre} · ${c.campana}` })),
+          ...propuestas.filter((p) => !p.collabId).map((p) => ({ tipo: "propuesta" as const, id: p.id, label: `Propuesta · ${marcaDe(p, marcas).nombre}` })),
+        ]}
+        onCreate={(t) => {
+          setTareas((ts) => [t, ...ts])
+          toast.success("Tarea creada")
+        }}
+      />
     </PageBody>
   )
 }

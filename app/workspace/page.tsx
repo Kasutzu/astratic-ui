@@ -1,19 +1,18 @@
 import type { Metadata } from "next"
 import {
-  demoCollabs,
-  demoHighlight,
-  demoLinks,
-  demoNotices,
-  demoProfile,
-  demoStats,
-  demoTasks,
-} from "@/lib/influencer/demo-data"
+  hoy,
+  listarAvisos,
+  listarCollabsActivas,
+  listarEnlaces,
+  listarMarcas,
+  listarPropuestas,
+  listarTareas,
+  obtenerPerfil,
+  resumenInicio,
+} from "@/lib/influencer/consultas"
 import { InicioView } from "./inicio-view"
 
 export const metadata: Metadata = { title: "Inicio" }
-
-/** Los datos de ejemplo viven en octubre de 2026: la demo se mira «desde» ese día para que las fechas cuadren. */
-const HOY = new Date("2026-10-06T11:30:00")
 
 function saludo(d: Date) {
   const h = d.getHours()
@@ -23,17 +22,21 @@ function saludo(d: Date) {
 }
 
 export default function InicioPage() {
+  const ahora = hoy()
+  const { destacado, avisos } = listarAvisos()
   return (
     <InicioView
-      greeting={saludo(HOY)}
-      now={HOY.toISOString()}
-      profile={demoProfile}
-      stats={demoStats}
-      collabs={demoCollabs}
-      tasks={demoTasks}
-      highlight={demoHighlight}
-      notices={demoNotices}
-      links={demoLinks}
+      greeting={saludo(new Date(ahora))}
+      now={ahora}
+      perfil={obtenerPerfil()}
+      cifras={resumenInicio()}
+      collabs={listarCollabsActivas().filter((c) => c.estado === "en-curso" || c.estado === "por-empezar")}
+      marcas={listarMarcas()}
+      propuestas={listarPropuestas()}
+      tareas={listarTareas()}
+      destacado={destacado}
+      avisos={avisos}
+      enlaces={listarEnlaces()}
     />
   )
 }
